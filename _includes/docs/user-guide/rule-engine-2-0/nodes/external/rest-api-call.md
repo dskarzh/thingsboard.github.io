@@ -3,9 +3,44 @@ multiple authentication methods including TLS/SSL encryption.
 
 ## Configuration
 
-### Endpoint URL pattern
+### Request URL
 
-Specifies the endpoint URL where requests will be sent. Supports [templatization](/docs/{{docsPrefix}}user-guide/templatization/).
+#### URL
+
+Specifies the URL where requests will be sent. Supports [templatization](/docs/{{docsPrefix}}user-guide/templatization/).
+
+Example: `https://api.example.com/v1/devices/${deviceId}/data?version=2`
+
+#### Query parameters
+
+Additional query parameters to append to the request URL. Both names and values support [templatization](/docs/{{docsPrefix}}user-guide/templatization/). Duplicate parameter names are supported.
+
+{% capture queryparams_append_note %}
+**Note**: Query parameters are added to any query parameters already present in the URL, rather than replacing them. For example, if the URL is `https://api.example.com/data?version=2` and you add a query parameter `deviceId` with value `sensor-01`, the resulting request URL will be `https://api.example.com/data?version=2&deviceId=sensor-01`.
+{% endcapture %}
+{% include templates/info-banner.md content=queryparams_append_note %}
+
+#### Encoding
+
+The URL and query parameters are encoded differently:
+
+**URL** is used as-is without any encoding applied by the node. If your URL contains special characters, you must percent-encode them yourself before configuration.
+
+**Query parameters** are automatically percent-encoded per RFC 3986 after template resolution.
+
+**Examples**:
+
+| Scenario            | URL                                        | Query parameter name | Query parameter value       | Resulting request URL                                                   |
+|---------------------|--------------------------------------------|----------------------|-----------------------------|-------------------------------------------------------------------------|
+| Path with space     | `https://api.example.com/my%20device/data` | –                    | –                           | `https://api.example.com/my%20device/data`                              |
+| Email with `+`      | `https://api.example.com/notify`           | `email`              | `user+tag@test.com`         | `https://api.example.com/notify?email=user%2Btag%40test.com`            |
+| ISO 8601 timestamp  | `https://api.example.com/data`             | `from`               | `2024-01-01T09:00:00+02:00` | `https://api.example.com/data?from=2024-01-01T09%3A00%3A00%2B02%3A00`   |
+| Nested query string | `https://api.example.com/search`           | `filter`             | `status=active&type=sensor` | `https://api.example.com/search?filter=status%3Dactive%26type%3Dsensor` |
+
+{% capture queryparams_note %}
+**Note**: The encoding rules described above were introduced in TB version 4.3. Prior to this, legacy URL encoding was used, which handled special characters inconsistently. Existing rule nodes that have not been modified since TB 4.3 will continue to use legacy encoding to preserve backward compatibility. Once you save a node's configuration, the new encoding rules apply automatically. The legacy encoding behavior is not available for newly created or modified nodes.
+{% endcapture %}
+{% include templates/warn-banner.md content=queryparams_note %}
 
 ### Request method
 
@@ -43,8 +78,7 @@ setting.
 - **Enabled** – No request body is sent, even for methods that typically include one
 
 {% capture attachment_note %}
-**Note**: When request body is enabled, if the message metadata contains an `attachments` field with blob entity IDs, the content of the first blob entity will be used as the
-request body instead of the message data.
+**PE only**: If the message metadata contains an `attachments` field with blob entity IDs, the content of the first blob entity will be used as the request body instead of the message data.
 {% endcapture %}
 {% include templates/info-banner.md content=attachment_note %}
 
@@ -198,7 +232,25 @@ nodes including this REST API call node.
     "restEndpointUrlPattern": {
       "type": "string",
       "minLength": 1,
-      "description": "Endpoint URL (supports templatization)."
+      "description": "Request URL (supports templatization)."
+    },
+    "queryParams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Parameter name (supports templatization)."
+          },
+          "value": {
+            "type": "string",
+            "description": "Parameter value (supports templatization)."
+          }
+        },
+        "required": ["key", "value"]
+      },
+      "description": "Query parameters."
     },
     "requestMethod": {
       "type": "string",
@@ -241,21 +293,20 @@ nodes including this REST API call node.
       "description": "Whether to use system proxy properties."
     },
     "proxyHost": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Proxy server hostname (when not using system properties)."
     },
     "proxyPort": {
       "type": "integer",
-      "minimum": 1,
       "maximum": 65535,
       "description": "Proxy server port (when not using system properties)."
     },
     "proxyUser": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Proxy authentication username."
     },
     "proxyPassword": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Proxy authentication password."
     },
     "credentials": {
@@ -291,7 +342,10 @@ For each incoming message, the node performs the following steps:
 1. If **Force acknowledgement** is enabled, the incoming message is acknowledged immediately.
 2. If **Max number of parallel requests** is configured, the node waits for an available slot. If no slot becomes available within the read timeout period, the message fails with a
    timeout error.
-3. The node processes the **Endpoint URL pattern**, replacing templates with values from the incoming message data and metadata to construct the final URL.
+3. The node constructs the request URL:
+    - Templates in the **URL** field are replaced with values from the incoming message data and metadata
+    - **Query parameters** are processed: templates are resolved, then both names and values are percent-encoded per RFC 3986
+    - Query parameters are appended to the URL
 4. HTTP headers are prepared:
     - Configured headers are added with template processing
     - For Basic credentials, an `Authorization` header is added with base64-encoded credentials
@@ -387,6 +441,7 @@ Metadata:
 ```json
 {
   "restEndpointUrlPattern": "https://api.smart-home.com/v1/devices/${deviceId}/commands",
+  "queryParams": [],
   "requestMethod": "POST",
   "headers": {
     "Content-Type": "application/json"
@@ -438,7 +493,7 @@ Metadata:
 
 **Result**
 
-The node constructs the endpoint URL as `https://api.smart-home.com/v1/devices/lock-bedroom-01/commands` and prepares the following headers:
+The node constructs the request URL as `https://api.smart-home.com/v1/devices/lock-bedroom-01/commands` and prepares the following headers:
 
 - `Content-Type: application/json`
 - `Authorization: Basic YXBpLWNsaWVudDpzZWN1cmUtcGFzc3dvcmQ=`
